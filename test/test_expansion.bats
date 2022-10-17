@@ -7,8 +7,8 @@ load bats_helper
 # setup is run beofre each test
 function setup {
   INPUT_PROJECT_CONFIG=${BATS_TMPDIR}/input_config-${BATS_TEST_NUMBER}
-  PROCESSED_PROJECT_CONFIG=${BATS_TMPDIR}/packed_config-${BATS_TEST_NUMBER} 
-  JSON_PROJECT_CONFIG=${BATS_TMPDIR}/json_config-${BATS_TEST_NUMBER} 
+  PROCESSED_PROJECT_CONFIG=${BATS_TMPDIR}/packed_config-${BATS_TEST_NUMBER}
+  JSON_PROJECT_CONFIG=${BATS_TMPDIR}/json_config-${BATS_TEST_NUMBER}
 	echo "#using temp file ${BATS_TMPDIR}/"
 
   # the name used in example config files.
@@ -83,7 +83,7 @@ function setup {
 
 
   assert_contains_text "Max Queue Time: 1 minutes"
-  assert_contains_text "Rerunning check 1/1" 
+  assert_contains_text "Rerunning check 1/1"
   assert_contains_text "This build (${CIRCLE_BUILD_NUM}) is queued, waiting for build number (3) to complete."
   assert_contains_text "Max wait time exceeded"
   assert_contains_text "Cancelleing build 2"

@@ -75,7 +75,7 @@ steps:
 
         fetch_filtered_active_builds(){
           if [ "<<parameters.consider-branch>>" != "true" ];then
-            echo "Orb parameter 'consider-branch' is false, will block previous builds on any branch." 
+            echo "Orb parameter 'consider-branch' is false, will block previous builds on any branch."
             jobs_api_url_template="https://circleci.com/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}?filter=running"
           elif [ -n "${CIRCLE_TAG:x}" ] && [ "<<parameters.tag-pattern>>" != "" ]; then
             # I'm not sure why this is here, seems identical to above?
@@ -121,31 +121,48 @@ steps:
             mv /tmp/augmented_jobstatus-${workflow}.json /tmp/augmented_jobstatus.json
           done
         }
-
-        update_comparables(){     
+        fetch_on_hold_workflows(){
+          pipelines_template_url="https://circleci.com/api/v2/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/pipeline?branch=${CIRCLE_BRANCH}"
+          fetch "$pipelines_template_url" "/tmp/pipelines.json"
+          > /tmp/v2_workflows.json
+          for pipeline_id in `jq -r '.items[] | .id' /tmp/pipelines.json`
+          do
+            workflow_template_url="https://circleci.com/api/v2/pipeline/$pipeline_id/workflow"
+            fetch "$workflow_template_url" "/tmp/v2_workflow_${pipeline_id}.json"
+            cat /tmp/v2_workflow_${pipeline_id}.json >> /tmp/v2_workflows.json
+          done
+          jq '.items[] | select(.status? == "on_hold")' /tmp/v2_workflows.json | jq -s . > /tmp/all_on_hold_workflows.json
+        }
+        update_comparables(){
           fetch_filtered_active_builds
 
           fetch_active_workflows
 
+          fetch_on_hold_workflows
+
           load_current_workflow_values
 
-          # falsey parameters are empty strings, so always compare against 'true' 
+          # falsey parameters are empty strings, so always compare against 'true'
           if [ "<<parameters.block-workflow>>" = "true" ] ;then
             echo "Orb parameter block-workflow is true."
             echo "This job will block until no previous workflows have *any* jobs running."
+            oldest_commit_time_running=`jq 'sort_by(.workflows.created_at)| .[0].workflows.created_at' /tmp/augmented_jobstatus.json`
+            oldest_commit_time_on_hold=`jq 'sort_by(.created_at) | .[0].created_at' /tmp/all_on_hold_workflows.json`
+            if [[ $oldest_commit_time_running < $oldest_commit_time_on_hold ]]; then oldest_commit_time=$oldest_commit_time_running; else oldest_commit_time=$oldest_commit_time_on_hold; fi
             oldest_running_build_num=`jq 'sort_by(.workflows.created_at)| .[0].build_num' /tmp/augmented_jobstatus.json`
-            oldest_commit_time=`jq 'sort_by(.workflows.created_at)| .[0].workflows.created_at' /tmp/augmented_jobstatus.json`
+            oldest_on_hold_build_num="(ON_HOLD job - no build num assigned)"
+            if [[ $oldest_commit_time_running < $oldest_commit_time_on_hold ]]; then oldest_build_num=$oldest_running_build_num; else oldest_build_num=$oldest_on_hold_build_num; fi
           else
             echo "Orb parameter block-workflow is false."
             echo "Only blocking execution if running previous jobs matching this job: ${CIRCLE_JOB}"
-            oldest_running_build_num=`jq ". | map(select(.workflows.job_name==\"${CIRCLE_JOB}\")) | sort_by(.workflows.created_at)|  .[0].build_num" /tmp/augmented_jobstatus.json`
+            oldest_build_num=`jq ". | map(select(.workflows.job_name==\"${CIRCLE_JOB}\")) | sort_by(.workflows.created_at)|  .[0].build_num" /tmp/augmented_jobstatus.json`
             oldest_commit_time=`jq ". | map(select(.workflows.job_name==\"${CIRCLE_JOB}\")) | sort_by(.workflows.created_at)|  .[0].workflows.created_at" /tmp/augmented_jobstatus.json`
           fi
           if [ -z "$oldest_commit_time" ]; then
             echo "API Error - unable to load previous job timings. Report to developer."
             exit 1
           fi
-          echo "Oldest job: $oldest_running_build_num"
+          echo "Oldest job: $oldest_build_num"
           if [ -z $oldest_commit_time ];then
             echo "API Call for existing jobs failed, failing this build.  Please check API token"
             echo "All running jobs:"
@@ -187,7 +204,7 @@ steps:
 
         #
         # Set values that wont change while we wait
-        # 
+        #
         load_variables
         max_time=<<parameters.time>>
         echo "This build will block until all previous builds complete."
@@ -219,7 +236,7 @@ steps:
           else
             # If we fail, reset confidence
             confidence=0
-            echo "This build (${CIRCLE_BUILD_NUM}) is queued, waiting for build number (${oldest_running_build_num}) to complete."
+            echo "This build (${CIRCLE_BUILD_NUM}) is queued, waiting for build number (${oldest_build_num}) to complete."
             echo "Total Queue time: ${wait_time} seconds."
           fi
 
